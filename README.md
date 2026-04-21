@@ -13,8 +13,8 @@ This copy keeps the cleanup engine intact but refreshes the interface for usabil
 ## Included
 
 - `SweepCoreApp/` contains the WPF application source
-- `build.ps1` compiles the app directly into a `.exe`
-- `bin/SweepCore.exe` is created after the build
+- `build.ps1` compiles the app locally into `bin/SweepCore.exe`
+- `bin/` is ignored by Git because it only contains generated build artifacts
 
 ## Safety Principles
 

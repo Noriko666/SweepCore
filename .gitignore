@@ -1,8 +1,4 @@
-bin/*
-!bin/SweepCore.exe
-
-bin/Assets/
-bin/Logs/
+bin/
 
 *.log
 Thumbs.db
