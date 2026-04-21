@@ -1,56 +1,96 @@
 # SweepCore 1.0
 
-SweepCore is a Windows desktop utility focused on three everyday maintenance tasks:
+SweepCore is a Windows desktop utility for three common maintenance tasks:
 
 - cleaning temporary files and browser cache
 - uninstalling installed applications
 - managing Windows startup entries
 
-The goal is simple: make common cleanup actions easier to understand and safer to use for non-technical users.
+The project is built around one idea: make routine cleanup actions easier to understand, easier to review, and safer to use.
 
-## What It Does
+## Overview
+
+SweepCore brings cleanup, uninstall, and startup controls into one focused desktop interface.
+
+Instead of exposing a long list of technical options, the app uses a guided flow for cleanup, a simple app view for uninstalling software, and a direct startup list for enabling or disabling launch entries.
+
+## Core Features
 
 ### Clean up
 
-SweepCore scans supported temporary-file and browser-cache locations, shows what was found, and lets you choose exactly which areas should be cleaned.
+- guided scan -> select -> clean workflow
+- clear separation of cleanup targets
+- file preview for the current selection
+- explicit selection before cleanup starts
+- cleanup uses the Windows Recycle Bin
 
 ### Uninstall apps
 
-SweepCore lists the applications registered in Windows and lets you open each program's normal uninstaller from a simple app view.
+- searchable list of installed applications
+- filters and sorting for easier browsing
+- direct access to each program's registered Windows uninstaller
+- automatic refresh after uninstall actions when possible
 
 ### Startup
 
-SweepCore shows enabled and disabled startup entries and lets you turn them on or off from one place.
+- view enabled and disabled startup entries in one place
+- enable or disable startup items directly
+- support for classic registry startup entries and Windows app startup tasks
+- search and filtering for faster management
 
-## Main Features
+## Cleanup Scope
 
-- guided cleanup flow with scan, selection, and cleanup steps
-- clear app uninstall view with search, filters, and direct uninstall access
-- startup management with enable and disable toggles
-- dark default interface with a simple left navigation
-- focused layout that keeps the next action visible
+SweepCore currently scans supported locations such as:
 
-## Safety
+- user temp files
+- Windows temp files
+- crash dump files
+- Windows Error Reporting files
+- browser cache data for Chrome
+- browser cache data for Edge
+- browser cache data for Brave
+- browser cache data for Firefox
 
-- cleanup requires an explicit selection before anything is removed
-- cleanup uses the Windows Recycle Bin instead of permanent deletion
-- only supported cleanable files and cache locations are included
-- browser cleanup is limited to cache-related locations
-- passwords, saved addresses, autofill forms, and profile databases are excluded
-- uninstall actions open the registered Windows uninstaller instead of silently removing software
-- startup changes are made through Windows startup settings only
-- cleanup runs write an action log
+Browser cleanup is intentionally limited to cache-related locations. Passwords, saved addresses, autofill data, and profile databases are excluded.
 
-## Project Files
+## Safety Approach
+
+- cleanup requires an explicit selection
+- cleanup is sent to the Recycle Bin instead of being permanently deleted
+- only supported cleanable locations are included
+- protected and blocked files are not treated like normal cleanup targets
+- uninstall actions open the normal registered Windows uninstaller
+- startup changes are made through Windows startup mechanisms
+- cleanup runs create an action log
+
+## Interface Goals
+
+- keep the next important action visible
+- reduce visual clutter for non-technical users
+- make cleanup choices understandable before anything is removed
+- keep app uninstall and startup controls simple and direct
+- default to a dark interface with a focused navigation layout
+
+## Project Structure
 
 - `SweepCoreApp/` contains the WPF application source
-- `build.ps1` builds the desktop app locally
-- `bin/` is ignored by Git because it only contains generated build output
+- `Assets/` contains repository assets such as the app logo
+- `build.ps1` builds the application locally
+- `bin/` is ignored by Git because it contains generated build output only
 
 ## Build
+
+SweepCore is currently built locally on Windows through the included PowerShell build script.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\build.ps1
 ```
 
-After the build, the generated executable is available locally at `bin/SweepCore.exe`.
+After a successful build, the generated executable is available locally at:
+
+`bin/SweepCore.exe`
+
+## Notes
+
+- this repository is source-first, so generated build output is not stored in Git
+- public screenshots are intentionally omitted for now to avoid exposing personal app lists, startup entries, or other machine-specific data
