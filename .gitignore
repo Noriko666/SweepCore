@@ -1,0 +1,9 @@
+bin/*
+!bin/SweepCore.exe
+
+bin/Assets/
+bin/Logs/
+
+*.log
+Thumbs.db
+Desktop.ini
