@@ -14,6 +14,16 @@ SweepCore brings cleanup, uninstall, and startup controls into one focused deskt
 
 Instead of exposing a long list of technical options, the app uses a guided flow for cleanup, a simple app view for uninstalling software, and a direct startup list for enabling or disabling launch entries.
 
+## Screenshots
+
+### Clean up
+
+![SweepCore cleanup workflow](docs/screenshots/cleanup-overview.png)
+
+### Uninstall apps
+
+![SweepCore uninstall apps view](docs/screenshots/uninstall-apps.png)
+
 ## Core Features
 
 ### Clean up
@@ -89,8 +99,3 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 After a successful build, the generated executable is available locally at:
 
 `bin/SweepCore.exe`
-
-## Notes
-
-- this repository is source-first, so generated build output is not stored in Git
-- public screenshots are intentionally omitted for now to avoid exposing personal app lists, startup entries, or other machine-specific data

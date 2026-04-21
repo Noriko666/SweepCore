@@ -954,7 +954,7 @@ namespace SweepCoreApp
 
             header.Children.Add(BuildCardHeader(
                 "Files (sample)",
-                "Zur Kontrolle vor dem Cleanup."));
+                "For review before cleanup."));
 
             cleanupPreviewCaptionText = new TextBlock
             {
