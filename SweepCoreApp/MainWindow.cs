@@ -14,6 +14,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Runtime.InteropServices;
 
 namespace SweepCoreApp
 {
@@ -32,6 +33,24 @@ namespace SweepCoreApp
         private const string TargetEdge = "edge";
         private const string TargetBrave = "brave";
         private const string TargetFirefox = "firefox";
+        private const string AssetUiLogo = "sweepcore-ui-logo.png";
+        private const string AssetUiHeroBanner = "sweepcore-ui-hero-banner.png";
+        private const string AssetUiCardPanel = "sweepcore-ui-card-panel.png";
+        private const string AssetUiButtonPrimary = "sweepcore-ui-button-primary.png";
+        private const string AssetUiButtonSecondary = "sweepcore-ui-button-secondary.png";
+        private const string AssetUiButtonGhost = "sweepcore-ui-button-ghost.png";
+        private const string AssetUiCleanupIcon = "sweepcore-ui-icon-cleanup.png";
+        private const string AssetUiUninstallIcon = "sweepcore-ui-icon-uninstall.png";
+        private const string AssetUiStartupIcon = "sweepcore-ui-icon-startup.png";
+        private const string AssetUiRefreshIcon = "sweepcore-ui-icon-refresh.png";
+        private const string AssetUiPatternTile = "sweepcore-ui-pattern-tile.png";
+        private const int DwmUseImmersiveDarkMode = 20;
+        private const int DwmUseImmersiveDarkModeLegacy = 19;
+        private const int DwmWindowCornerPreference = 33;
+        private const int DwmBorderColor = 34;
+        private const int DwmCaptionColor = 35;
+        private const int DwmTextColor = 36;
+        private const int DwmRoundWindowCorners = 2;
 
         private static readonly string[] CleanupTargetOrder =
         {
@@ -51,6 +70,14 @@ namespace SweepCoreApp
         private readonly ObservableCollection<InstalledAppInfo> visibleApps;
         private readonly HashSet<string> selectedCleanupTargets;
         private readonly Dictionary<NavigationSection, Button> navigationButtons;
+        private readonly Dictionary<string, ImageSource> assetImageCache;
+
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(
+            IntPtr hwnd,
+            int dwAttribute,
+            ref int pvAttribute,
+            int cbAttribute);
 
         private ContentControl pageHost;
         private TextBlock headerEyebrowText;
@@ -146,6 +173,7 @@ namespace SweepCoreApp
             visibleApps = new ObservableCollection<InstalledAppInfo>();
             selectedCleanupTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             navigationButtons = new Dictionary<NavigationSection, Button>();
+            assetImageCache = new Dictionary<string, ImageSource>(StringComparer.OrdinalIgnoreCase);
             allInstalledApps = new List<InstalledAppInfo>();
             allStartupItems = new List<StartupItemInfo>();
             visibleStartupItems = new List<StartupItemInfo>();
@@ -170,6 +198,7 @@ namespace SweepCoreApp
             Background = WindowBackgroundBrush();
             Content = BuildShell();
 
+            SourceInitialized += delegate { ApplyWindowFrameTheme(); };
             Loaded += delegate { RefreshDashboard(); };
         }
 
@@ -313,13 +342,28 @@ namespace SweepCoreApp
         {
             var button = new Button
             {
-                Content = label,
+                Content = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Children =
+                    {
+                        BuildSectionIcon(section, 24),
+                        new TextBlock
+                        {
+                            Text = label,
+                            VerticalAlignment = VerticalAlignment.Center,
+                            FontSize = 14,
+                            FontWeight = FontWeights.SemiBold
+                        }
+                    }
+                },
                 HorizontalContentAlignment = HorizontalAlignment.Left,
+                VerticalContentAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(0, 0, 0, 10),
-                Padding = new Thickness(16, 14, 16, 14),
-                FontSize = 14,
-                FontWeight = FontWeights.SemiBold,
-                BorderThickness = new Thickness(1),
+                Padding = new Thickness(16, 12, 16, 12),
+                BorderThickness = new Thickness(0),
+                Template = BuildButtonTemplate(18),
                 Cursor = Cursors.Hand
             };
 
@@ -1256,6 +1300,7 @@ namespace SweepCoreApp
             var refreshButton = BuildGhostButton("Refresh", false);
             refreshButton.Height = 38;
             refreshButton.Margin = new Thickness(18, 0, 0, 0);
+            refreshButton.Content = BuildButtonContent("Refresh", AssetUiRefreshIcon, 16);
             refreshButton.Click += delegate { RefreshInstalledAppsFromToolbar(); };
             Grid.SetColumn(refreshButton, 1);
             root.Children.Add(refreshButton);
@@ -1265,10 +1310,11 @@ namespace SweepCoreApp
                 Height = 38,
                 Margin = new Thickness(12, 0, 0, 0),
                 Padding = new Thickness(12, 8, 12, 8),
-                Background = SurfaceMutedBrush(),
+                Background = InputSurfaceBrush(),
                 BorderBrush = AccentOutlineBrush(),
                 BorderThickness = new Thickness(1),
                 Foreground = PrimaryTextBrush(),
+                Style = BuildTextBoxStyle(),
                 Text = appSearchQuery,
                 VerticalContentAlignment = VerticalAlignment.Center
             };
@@ -1394,6 +1440,7 @@ namespace SweepCoreApp
             var refreshButton = BuildGhostButton("Refresh", false);
             refreshButton.Height = 38;
             refreshButton.Margin = new Thickness(18, 0, 0, 0);
+            refreshButton.Content = BuildButtonContent("Refresh", AssetUiRefreshIcon, 16);
             refreshButton.Click += delegate { RefreshStartupItemsFromToolbar(); };
             Grid.SetColumn(refreshButton, 1);
             root.Children.Add(refreshButton);
@@ -1403,10 +1450,11 @@ namespace SweepCoreApp
                 Height = 38,
                 Margin = new Thickness(12, 0, 0, 0),
                 Padding = new Thickness(12, 8, 12, 8),
-                Background = SurfaceMutedBrush(),
+                Background = InputSurfaceBrush(),
                 BorderBrush = AccentOutlineBrush(),
                 BorderThickness = new Thickness(1),
                 Foreground = PrimaryTextBrush(),
+                Style = BuildTextBoxStyle(),
                 Text = startupSearchQuery,
                 VerticalContentAlignment = VerticalAlignment.Center
             };
@@ -1563,8 +1611,8 @@ namespace SweepCoreApp
             return new Border
             {
                 Background = SurfaceBrush(),
-                BorderBrush = OutlineBrush(),
-                BorderThickness = new Thickness(1),
+                BorderBrush = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
                 CornerRadius = new CornerRadius(24),
                 Padding = new Thickness(20),
                 Margin = new Thickness(0, 0, 0, 18)
@@ -1578,8 +1626,8 @@ namespace SweepCoreApp
                 Height = 38,
                 Margin = new Thickness(12, 0, 0, 0),
                 Padding = new Thickness(10, 6, 10, 6),
-                Background = SurfaceMutedBrush(),
-                BorderBrush = OutlineBrush(),
+                Background = InputSurfaceBrush(),
+                BorderBrush = AccentOutlineBrush(),
                 BorderThickness = new Thickness(1),
                 Foreground = PrimaryTextBrush(),
                 Style = BuildComboBoxStyle(),
@@ -1589,8 +1637,8 @@ namespace SweepCoreApp
                 VerticalContentAlignment = VerticalAlignment.Center,
                 ItemContainerStyle = BuildComboBoxItemStyle()
             };
-            comboBox.Resources[SystemColors.WindowBrushKey] = SurfaceMutedBrush();
-            comboBox.Resources[SystemColors.ControlBrushKey] = SurfaceMutedBrush();
+            comboBox.Resources[SystemColors.WindowBrushKey] = InputSurfaceBrush();
+            comboBox.Resources[SystemColors.ControlBrushKey] = InputSurfaceBrush();
             comboBox.Resources[SystemColors.WindowTextBrushKey] = PrimaryTextBrush();
             comboBox.Resources[SystemColors.HighlightBrushKey] = SelectedTileBackgroundBrush();
             comboBox.Resources[SystemColors.HighlightTextBrushKey] = PrimaryTextBrush();
@@ -1607,7 +1655,7 @@ namespace SweepCoreApp
         private Style BuildComboBoxStyle()
         {
             var style = new Style(typeof(ComboBox));
-            style.Setters.Add(new Setter(Control.BackgroundProperty, SurfaceMutedBrush()));
+            style.Setters.Add(new Setter(Control.BackgroundProperty, InputSurfaceBrush()));
             style.Setters.Add(new Setter(Control.BorderBrushProperty, AccentOutlineBrush()));
             style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(1)));
             style.Setters.Add(new Setter(Control.ForegroundProperty, PrimaryTextBrush()));
@@ -1636,7 +1684,7 @@ namespace SweepCoreApp
             outerBorder.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Control.BackgroundProperty));
             outerBorder.SetValue(Border.BorderBrushProperty, new TemplateBindingExtension(Control.BorderBrushProperty));
             outerBorder.SetValue(Border.BorderThicknessProperty, new TemplateBindingExtension(Control.BorderThicknessProperty));
-            outerBorder.SetValue(Border.CornerRadiusProperty, new CornerRadius(0));
+            outerBorder.SetValue(Border.CornerRadiusProperty, new CornerRadius(16));
             root.AppendChild(outerBorder);
 
             var layout = new FrameworkElementFactory(typeof(DockPanel));
@@ -1647,7 +1695,7 @@ namespace SweepCoreApp
             arrowHost.SetValue(FrameworkElement.WidthProperty, 34.0);
             arrowHost.SetValue(Border.BorderBrushProperty, OutlineBrush());
             arrowHost.SetValue(Border.BorderThicknessProperty, new Thickness(1, 0, 0, 0));
-            arrowHost.SetValue(Border.BackgroundProperty, SurfaceBrush());
+            arrowHost.SetValue(Border.BackgroundProperty, InputSurfaceBrush());
             layout.AppendChild(arrowHost);
 
             var arrow = new FrameworkElementFactory(typeof(System.Windows.Shapes.Path));
@@ -2417,10 +2465,11 @@ namespace SweepCoreApp
                 Padding = large ? new Thickness(18, 12, 18, 12) : new Thickness(16, 10, 16, 10),
                 FontSize = large ? 14 : 13,
                 FontWeight = FontWeights.SemiBold,
-                Background = AccentBrush(),
+                Background = PrimaryButtonBackgroundBrush(),
                 Foreground = OnAccentTextBrush(),
-                BorderBrush = AccentBorderBrush(),
-                BorderThickness = new Thickness(1),
+                BorderBrush = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Template = BuildButtonTemplate(16),
                 Cursor = Cursors.Hand
             };
         }
@@ -2434,10 +2483,11 @@ namespace SweepCoreApp
                 Padding = large ? new Thickness(18, 12, 18, 12) : new Thickness(16, 10, 16, 10),
                 FontSize = large ? 14 : 13,
                 FontWeight = FontWeights.SemiBold,
-                Background = HeroButtonBrush(),
+                Background = SecondaryButtonBackgroundBrush(),
                 Foreground = HeroPrimaryTextBrush(),
-                BorderBrush = HeroOutlineBrush(),
-                BorderThickness = new Thickness(1),
+                BorderBrush = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Template = BuildButtonTemplate(16),
                 Cursor = Cursors.Hand
             };
         }
@@ -2451,10 +2501,11 @@ namespace SweepCoreApp
                 Padding = large ? new Thickness(18, 12, 18, 12) : new Thickness(16, 10, 16, 10),
                 FontSize = large ? 14 : 13,
                 FontWeight = FontWeights.SemiBold,
-                Background = SurfaceMutedBrush(),
+                Background = GhostButtonBackgroundBrush(),
                 Foreground = PrimaryTextBrush(),
-                BorderBrush = OutlineBrush(),
-                BorderThickness = new Thickness(1),
+                BorderBrush = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Template = BuildButtonTemplate(16),
                 Cursor = Cursors.Hand
             };
         }
@@ -3340,9 +3391,9 @@ namespace SweepCoreApp
                 return;
             }
 
-            button.Background = isSelected ? AccentMutedBrush() : Brushes.Transparent;
-            button.BorderBrush = isSelected ? AccentOutlineBrush() : OutlineBrush();
-            button.Foreground = isSelected ? AccentBrush() : PrimaryTextBrush();
+            button.Background = isSelected ? SecondaryButtonBackgroundBrush() : GhostButtonBackgroundBrush();
+            button.BorderBrush = Brushes.Transparent;
+            button.Foreground = isSelected ? HeroPrimaryTextBrush() : PrimaryTextBrush();
         }
 
         private void UpdateHeaderState()
@@ -3925,6 +3976,12 @@ namespace SweepCoreApp
 
         private UIElement BuildLogoVisual(double size)
         {
+            var generatedLogo = BuildAssetImage(AssetUiLogo, size, size, Stretch.Uniform);
+            if (generatedLogo != null)
+            {
+                return generatedLogo;
+            }
+
             string logoPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "sweepcore-hero-logo.png");
             if (File.Exists(logoPath))
             {
@@ -3962,7 +4019,7 @@ namespace SweepCoreApp
 
             fallback.Child = new TextBlock
             {
-                Text = "TC",
+                Text = "SC",
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
                 FontFamily = HeadingFontFamily(),
@@ -3972,6 +4029,339 @@ namespace SweepCoreApp
             };
 
             return fallback;
+        }
+
+        private UIElement BuildSectionIcon(NavigationSection section, double size)
+        {
+            string assetName = section == NavigationSection.Apps
+                ? AssetUiUninstallIcon
+                : section == NavigationSection.Startup
+                    ? AssetUiStartupIcon
+                    : AssetUiCleanupIcon;
+
+            var badge = BuildIconBadge(assetName, size, new Thickness(0, 0, 12, 0)) as FrameworkElement;
+            if (badge != null)
+            {
+                badge.RenderTransform = new TranslateTransform(0, 5);
+            }
+
+            return badge ?? BuildIconBadge(assetName, size, new Thickness(0, 0, 12, 0));
+        }
+
+        private UIElement BuildButtonContent(string label, string assetName, double iconSize)
+        {
+            var row = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+
+            row.Children.Add(BuildIconBadge(assetName, iconSize, new Thickness(0, 0, 8, 0)));
+
+            row.Children.Add(new TextBlock
+            {
+                Text = label,
+                VerticalAlignment = VerticalAlignment.Center
+            });
+
+            return row;
+        }
+
+        private Image BuildAssetImage(string assetName, double width, double height, Stretch stretch)
+        {
+            var source = LoadAssetImageSource(assetName);
+            if (source == null)
+            {
+                return null;
+            }
+
+            return new Image
+            {
+                Width = width,
+                Height = height,
+                Stretch = stretch,
+                Source = source
+            };
+        }
+
+        private UIElement BuildIconBadge(string assetName, double size, Thickness margin)
+        {
+            var outer = new Border
+            {
+                Width = size,
+                Height = size,
+                Margin = margin,
+                Background = CreateBrush(Color.FromRgb(14, 28, 47)),
+                BorderBrush = AccentOutlineBrush(),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(size / 2)
+            };
+
+            var inner = new Border
+            {
+                Width = Math.Max(10, size - 6),
+                Height = Math.Max(10, size - 6),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Background = CreateAssetViewBrush(
+                    assetName,
+                    GetIconViewbox(assetName),
+                    0.94),
+                CornerRadius = new CornerRadius(Math.Max(5, (size - 6) / 2))
+            };
+
+            outer.Child = inner;
+            return outer;
+        }
+
+        private Rect GetIconViewbox(string assetName)
+        {
+            if (string.Equals(assetName, AssetUiStartupIcon, StringComparison.OrdinalIgnoreCase))
+            {
+                return new Rect(0.07, 0.00, 0.82, 0.82);
+            }
+
+            if (string.Equals(assetName, AssetUiUninstallIcon, StringComparison.OrdinalIgnoreCase))
+            {
+                return new Rect(0.12, 0.10, 0.76, 0.76);
+            }
+
+            return new Rect(0.11, 0.08, 0.78, 0.78);
+        }
+
+        private ImageSource LoadAssetImageSource(string assetName)
+        {
+            if (string.IsNullOrWhiteSpace(assetName))
+            {
+                return null;
+            }
+
+            ImageSource cached;
+            if (assetImageCache.TryGetValue(assetName, out cached))
+            {
+                return cached;
+            }
+
+            string assetPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", assetName);
+            if (!File.Exists(assetPath))
+            {
+                return null;
+            }
+
+            try
+            {
+                var bitmap = new BitmapImage();
+                bitmap.BeginInit();
+                bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                bitmap.UriSource = new Uri(assetPath, UriKind.Absolute);
+                bitmap.EndInit();
+                bitmap.Freeze();
+
+                assetImageCache[assetName] = bitmap;
+                return bitmap;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private Brush CreateAssetViewBrush(string assetName, Rect viewbox, double opacity)
+        {
+            var source = LoadAssetImageSource(assetName);
+            if (source == null)
+            {
+                return Brushes.Transparent;
+            }
+
+            var brush = new ImageBrush(source)
+            {
+                Stretch = Stretch.Fill,
+                AlignmentX = AlignmentX.Center,
+                AlignmentY = AlignmentY.Center,
+                Viewbox = viewbox,
+                ViewboxUnits = BrushMappingMode.RelativeToBoundingBox,
+                Opacity = opacity
+            };
+            brush.Freeze();
+            return brush;
+        }
+
+        private Brush CreateAssetBrush(
+            string assetName,
+            Color fallbackColor,
+            Stretch stretch,
+            double opacity)
+        {
+            var source = LoadAssetImageSource(assetName);
+            if (source != null)
+            {
+                var brush = new ImageBrush(source)
+                {
+                    Stretch = stretch,
+                    Opacity = opacity
+                };
+                brush.Freeze();
+                return brush;
+            }
+
+            return CreateBrush(fallbackColor);
+        }
+
+        private Brush CreateLayeredAssetBrush(
+            string assetName,
+            Color baseColor,
+            Stretch stretch,
+            double overlayOpacity)
+        {
+            var source = LoadAssetImageSource(assetName);
+            if (source == null)
+            {
+                return CreateBrush(baseColor);
+            }
+
+            var group = new DrawingGroup();
+
+            var baseFill = CreateBrush(baseColor);
+            baseFill.Freeze();
+            group.Children.Add(new GeometryDrawing(
+                baseFill,
+                null,
+                new RectangleGeometry(new Rect(0, 0, 1, 1))));
+
+            var imageGroup = new DrawingGroup
+            {
+                Opacity = overlayOpacity
+            };
+            imageGroup.Children.Add(new ImageDrawing(source, new Rect(0, 0, 1, 1)));
+            group.Children.Add(imageGroup);
+
+            var brush = new DrawingBrush(group)
+            {
+                Stretch = stretch
+            };
+            brush.Freeze();
+            return brush;
+        }
+
+        private Brush CreateTiledAssetBrush(
+            string assetName,
+            Color fallbackColor,
+            double opacity,
+            double tileWidth,
+            double tileHeight)
+        {
+            var source = LoadAssetImageSource(assetName);
+            if (source != null)
+            {
+                var brush = new ImageBrush(source)
+                {
+                    Stretch = Stretch.Fill,
+                    TileMode = TileMode.Tile,
+                    Viewport = new Rect(0, 0, tileWidth, tileHeight),
+                    ViewportUnits = BrushMappingMode.Absolute,
+                    Viewbox = new Rect(0, 0, 1, 1),
+                    ViewboxUnits = BrushMappingMode.RelativeToBoundingBox,
+                    AlignmentX = AlignmentX.Left,
+                    AlignmentY = AlignmentY.Top,
+                    Opacity = opacity
+                };
+                brush.Freeze();
+                return brush;
+            }
+
+            return CreateBrush(fallbackColor);
+        }
+
+        private ControlTemplate BuildButtonTemplate(double cornerRadius)
+        {
+            var template = new ControlTemplate(typeof(Button));
+
+            var border = new FrameworkElementFactory(typeof(Border));
+            border.Name = "Chrome";
+            border.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Control.BackgroundProperty));
+            border.SetValue(Border.BorderBrushProperty, new TemplateBindingExtension(Control.BorderBrushProperty));
+            border.SetValue(Border.BorderThicknessProperty, new TemplateBindingExtension(Control.BorderThicknessProperty));
+            border.SetValue(Border.CornerRadiusProperty, new CornerRadius(cornerRadius));
+
+            var presenter = new FrameworkElementFactory(typeof(ContentPresenter));
+            presenter.SetValue(ContentPresenter.HorizontalAlignmentProperty, new TemplateBindingExtension(Control.HorizontalContentAlignmentProperty));
+            presenter.SetValue(ContentPresenter.VerticalAlignmentProperty, new TemplateBindingExtension(Control.VerticalContentAlignmentProperty));
+            presenter.SetValue(ContentPresenter.MarginProperty, new TemplateBindingExtension(Control.PaddingProperty));
+            presenter.SetValue(ContentPresenter.RecognizesAccessKeyProperty, true);
+            presenter.SetValue(System.Windows.Documents.TextElement.ForegroundProperty, new TemplateBindingExtension(Control.ForegroundProperty));
+            border.AppendChild(presenter);
+
+            template.VisualTree = border;
+
+            var disabledTrigger = new Trigger
+            {
+                Property = UIElement.IsEnabledProperty,
+                Value = false
+            };
+            disabledTrigger.Setters.Add(new Setter(UIElement.OpacityProperty, 0.48, "Chrome"));
+            template.Triggers.Add(disabledTrigger);
+
+            var hoverTrigger = new Trigger
+            {
+                Property = UIElement.IsMouseOverProperty,
+                Value = true
+            };
+            hoverTrigger.Setters.Add(new Setter(UIElement.OpacityProperty, 0.96, "Chrome"));
+            template.Triggers.Add(hoverTrigger);
+
+            var pressedTrigger = new Trigger
+            {
+                Property = ButtonBase.IsPressedProperty,
+                Value = true
+            };
+            pressedTrigger.Setters.Add(new Setter(UIElement.OpacityProperty, 0.82, "Chrome"));
+            template.Triggers.Add(pressedTrigger);
+
+            return template;
+        }
+
+        private Style BuildTextBoxStyle()
+        {
+            var style = new Style(typeof(TextBox));
+            style.Setters.Add(new Setter(Control.BackgroundProperty, InputSurfaceBrush()));
+            style.Setters.Add(new Setter(Control.BorderBrushProperty, AccentOutlineBrush()));
+            style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(1)));
+            style.Setters.Add(new Setter(Control.ForegroundProperty, PrimaryTextBrush()));
+            style.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(12, 8, 12, 8)));
+            style.Setters.Add(new Setter(Control.TemplateProperty, BuildTextBoxTemplate()));
+
+            var focusTrigger = new Trigger
+            {
+                Property = UIElement.IsKeyboardFocusedProperty,
+                Value = true
+            };
+            focusTrigger.Setters.Add(new Setter(Control.BorderBrushProperty, AccentBrush()));
+            style.Triggers.Add(focusTrigger);
+
+            return style;
+        }
+
+        private ControlTemplate BuildTextBoxTemplate()
+        {
+            var template = new ControlTemplate(typeof(TextBox));
+
+            var border = new FrameworkElementFactory(typeof(Border));
+            border.Name = "TextBoxBorder";
+            border.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Control.BackgroundProperty));
+            border.SetValue(Border.BorderBrushProperty, new TemplateBindingExtension(Control.BorderBrushProperty));
+            border.SetValue(Border.BorderThicknessProperty, new TemplateBindingExtension(Control.BorderThicknessProperty));
+            border.SetValue(Border.CornerRadiusProperty, new CornerRadius(16));
+
+            var contentHost = new FrameworkElementFactory(typeof(ScrollViewer));
+            contentHost.Name = "PART_ContentHost";
+            contentHost.SetValue(FrameworkElement.MarginProperty, new TemplateBindingExtension(Control.PaddingProperty));
+            contentHost.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+            border.AppendChild(contentHost);
+
+            template.VisualTree = border;
+            return template;
         }
 
         private FontFamily HeadingFontFamily()
@@ -4161,22 +4551,116 @@ namespace SweepCoreApp
 
         private Brush WindowBackgroundBrush()
         {
-            return CreateBrush(isDarkMode ? Color.FromRgb(8, 13, 22) : Color.FromRgb(244, 247, 251));
+            if (!isDarkMode)
+            {
+                return CreateBrush(Color.FromRgb(244, 247, 251));
+            }
+
+            var brush = new LinearGradientBrush();
+            brush.StartPoint = new Point(0, 0);
+            brush.EndPoint = new Point(1, 1);
+            brush.GradientStops.Add(new GradientStop(Color.FromRgb(8, 13, 22), 0));
+            brush.GradientStops.Add(new GradientStop(Color.FromRgb(11, 18, 30), 0.55));
+            brush.GradientStops.Add(new GradientStop(Color.FromRgb(10, 16, 28), 1));
+            return brush;
         }
 
         private Brush SidebarBrush()
         {
-            return CreateBrush(isDarkMode ? Color.FromRgb(12, 18, 30) : Color.FromRgb(248, 250, 253));
+            if (isDarkMode)
+            {
+                return CreateLayeredAssetBrush(
+                    AssetUiCardPanel,
+                    Color.FromRgb(12, 18, 30),
+                    Stretch.Fill,
+                    0.34);
+            }
+
+            return CreateBrush(Color.FromRgb(248, 250, 253));
         }
 
         private Brush SurfaceBrush()
         {
-            return CreateBrush(isDarkMode ? Color.FromRgb(18, 27, 43) : Color.FromRgb(255, 255, 255));
+            if (isDarkMode)
+            {
+                return CreateLayeredAssetBrush(
+                    AssetUiCardPanel,
+                    Color.FromRgb(18, 27, 43),
+                    Stretch.Fill,
+                    0.28);
+            }
+
+            return CreateBrush(Color.FromRgb(255, 255, 255));
         }
 
         private Brush SurfaceMutedBrush()
         {
-            return CreateBrush(isDarkMode ? Color.FromRgb(13, 21, 35) : Color.FromRgb(247, 249, 252));
+            if (isDarkMode)
+            {
+                return CreateLayeredAssetBrush(
+                    AssetUiCardPanel,
+                    Color.FromRgb(13, 21, 35),
+                    Stretch.Fill,
+                    0.18);
+            }
+
+            return CreateBrush(Color.FromRgb(247, 249, 252));
+        }
+
+        private Brush InputSurfaceBrush()
+        {
+            if (isDarkMode)
+            {
+                return CreateLayeredAssetBrush(
+                    AssetUiButtonGhost,
+                    Color.FromRgb(13, 21, 35),
+                    Stretch.Fill,
+                    0.28);
+            }
+
+            return CreateBrush(Color.FromRgb(247, 249, 252));
+        }
+
+        private Brush PrimaryButtonBackgroundBrush()
+        {
+            if (isDarkMode)
+            {
+                return CreateLayeredAssetBrush(
+                    AssetUiButtonPrimary,
+                    Color.FromRgb(22, 120, 244),
+                    Stretch.Fill,
+                    0.94);
+            }
+
+            return AccentBrush();
+        }
+
+        private Brush SecondaryButtonBackgroundBrush()
+        {
+            if (isDarkMode)
+            {
+                return CreateLayeredAssetBrush(
+                    AssetUiButtonSecondary,
+                    Color.FromRgb(58, 102, 153),
+                    Stretch.Fill,
+                    0.62);
+            }
+
+            return HeroButtonBrush();
+        }
+
+        private Brush GhostButtonBackgroundBrush()
+        {
+            if (isDarkMode)
+            {
+                return CreateLayeredAssetBrush(
+                    AssetUiButtonGhost,
+                    Color.FromRgb(18, 28, 45),
+                    Stretch.Fill,
+                    0.26);
+            }
+
+            return SurfaceMutedBrush();
         }
 
         private Brush OutlineBrush()
@@ -4231,20 +4715,20 @@ namespace SweepCoreApp
 
         private Brush HeroBackgroundBrush()
         {
+            if (isDarkMode)
+            {
+                return CreateLayeredAssetBrush(
+                    AssetUiHeroBanner,
+                    Color.FromRgb(9, 34, 69),
+                    Stretch.Fill,
+                    0.92);
+            }
+
             var brush = new LinearGradientBrush();
             brush.StartPoint = new Point(0, 0);
             brush.EndPoint = new Point(1, 1);
-            if (isDarkMode)
-            {
-                brush.GradientStops.Add(new GradientStop(Color.FromRgb(12, 54, 104), 0));
-                brush.GradientStops.Add(new GradientStop(Color.FromRgb(10, 102, 184), 1));
-            }
-            else
-            {
-                brush.GradientStops.Add(new GradientStop(Color.FromRgb(20, 94, 202), 0));
-                brush.GradientStops.Add(new GradientStop(Color.FromRgb(50, 155, 248), 1));
-            }
-
+            brush.GradientStops.Add(new GradientStop(Color.FromRgb(20, 94, 202), 0));
+            brush.GradientStops.Add(new GradientStop(Color.FromRgb(50, 155, 248), 1));
             return brush;
         }
 
@@ -4255,7 +4739,16 @@ namespace SweepCoreApp
 
         private Brush HeroCardBrush()
         {
-            return CreateBrush(isDarkMode ? Color.FromArgb(42, 255, 255, 255) : Color.FromArgb(48, 255, 255, 255));
+            if (isDarkMode)
+            {
+                return CreateLayeredAssetBrush(
+                    AssetUiCardPanel,
+                    Color.FromRgb(16, 38, 66),
+                    Stretch.Fill,
+                    0.26);
+            }
+
+            return CreateBrush(Color.FromArgb(48, 255, 255, 255));
         }
 
         private Brush HeroButtonBrush()
@@ -4281,6 +4774,42 @@ namespace SweepCoreApp
         private static SolidColorBrush CreateBrush(Color color)
         {
             return new SolidColorBrush(color);
+        }
+
+        private void ApplyWindowFrameTheme()
+        {
+            try
+            {
+                IntPtr handle = new WindowInteropHelper(this).Handle;
+                if (handle == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                if (isDarkMode)
+                {
+                    SetDwmIntAttribute(handle, DwmUseImmersiveDarkMode, 1);
+                    SetDwmIntAttribute(handle, DwmUseImmersiveDarkModeLegacy, 1);
+                    SetDwmIntAttribute(handle, DwmWindowCornerPreference, DwmRoundWindowCorners);
+                    SetDwmColorAttribute(handle, DwmCaptionColor, Color.FromRgb(10, 16, 28));
+                    SetDwmColorAttribute(handle, DwmTextColor, Color.FromRgb(232, 237, 243));
+                    SetDwmColorAttribute(handle, DwmBorderColor, Color.FromRgb(28, 54, 88));
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static void SetDwmIntAttribute(IntPtr handle, int attribute, int value)
+        {
+            DwmSetWindowAttribute(handle, attribute, ref value, Marshal.SizeOf(typeof(int)));
+        }
+
+        private static void SetDwmColorAttribute(IntPtr handle, int attribute, Color color)
+        {
+            int colorRef = color.R | (color.G << 8) | (color.B << 16);
+            DwmSetWindowAttribute(handle, attribute, ref colorRef, Marshal.SizeOf(typeof(int)));
         }
 
         private static bool ContainsIgnoreCase(string source, string query)

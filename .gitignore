@@ -1,5 +1,8 @@
 bin/
+dist/*
+!dist/SweepCoreSetup.exe
 
 *.log
 Thumbs.db
 Desktop.ini
+_tmp*.png

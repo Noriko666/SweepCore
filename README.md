@@ -24,6 +24,18 @@ Instead of exposing a long list of technical options, the app uses a guided flow
 
 ![SweepCore uninstall apps view](docs/screenshots/uninstall-apps.png)
 
+### Startup
+
+![SweepCore startup management view](docs/screenshots/startup.png)
+
+## Installation
+
+If you just want to use SweepCore, run the included single-file installer:
+
+`dist/SweepCoreSetup.exe`
+
+The installer places SweepCore in the local user profile, creates a desktop shortcut, adds Start menu entries, and includes a normal Windows uninstaller.
+
 ## Core Features
 
 ### Clean up
@@ -85,12 +97,15 @@ Browser cleanup is intentionally limited to cache-related locations. Passwords, 
 
 - `SweepCoreApp/` contains the WPF application source
 - `Assets/` contains repository assets such as the app logo
+- `docs/screenshots/` contains the current UI screenshots used in this README
 - `build.ps1` builds the application locally
+- `build-installer.ps1` builds the single-file installer locally
+- `dist/SweepCoreSetup.exe` is the generated installer that can be shared directly
 - `bin/` is ignored by Git because it contains generated build output only
 
 ## Build
 
-SweepCore is currently built locally on Windows through the included PowerShell build script.
+SweepCore is currently built locally on Windows through the included PowerShell build scripts.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\build.ps1
@@ -99,3 +114,13 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 After a successful build, the generated executable is available locally at:
 
 `bin/SweepCore.exe`
+
+To build the shareable installer:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build-installer.ps1
+```
+
+After a successful installer build, the generated setup is available locally at:
+
+`dist/SweepCoreSetup.exe`
