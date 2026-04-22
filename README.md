@@ -18,7 +18,7 @@ Instead of exposing a long list of technical options, the app uses a guided flow
 
 ### Clean up
 
-![SweepCore cleanup workflow](docs/screenshots/cleanup-overview.png)
+![SweepCore cleanup workflow](docs/screenshots/cleanup-overview-v2.png)
 
 ### Uninstall apps
 
