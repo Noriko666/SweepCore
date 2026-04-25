@@ -8,12 +8,20 @@ namespace SweepCoreApp
     internal sealed class SafeScanService
     {
         private const string TemporaryFilesSection = "Temporary Files";
-        private const string BrowserCacheSection = "Browser Cache";
+        private const string BrowserDataSection = "Browser Data";
 
         public ScanResult Run(IProgress<OperationProgressInfo> progress = null)
         {
+            return Run(new[] { BrowserDataType.Cache }, false, progress);
+        }
+
+        public ScanResult Run(
+            IEnumerable<BrowserDataType> browserDataTypes,
+            bool includeRecentTempFiles,
+            IProgress<OperationProgressInfo> progress = null)
+        {
             var entries = new List<ScanEntry>();
-            var rules = BuildRules();
+            var rules = BuildRules(browserDataTypes, includeRecentTempFiles);
             var cutoffUtc = DateTime.UtcNow;
             int ruleIndex = 0;
 
@@ -43,12 +51,6 @@ namespace SweepCoreApp
                             0);
                     }
 
-                    if (IsProtected(file))
-                    {
-                        entries.Add(BuildProtectedEntry(file, rule.Section, rule.Category));
-                        continue;
-                    }
-
                     FileInfo info;
                     try
                     {
@@ -71,6 +73,12 @@ namespace SweepCoreApp
 
                     if (rule.MinAgeDays > 0 && info.LastWriteTimeUtc > cutoffUtc.AddDays(-rule.MinAgeDays))
                     {
+                        continue;
+                    }
+
+                    if (IsProtected(file, rule.AllowProtectedExtensions))
+                    {
+                        entries.Add(BuildProtectedEntry(file, rule.Section, rule.Category));
                         continue;
                     }
 
@@ -107,9 +115,12 @@ namespace SweepCoreApp
             return new ScanResult(entries, summary);
         }
 
-        private static List<CandidateRule> BuildRules()
+        private static List<CandidateRule> BuildRules(
+            IEnumerable<BrowserDataType> browserDataTypes,
+            bool includeRecentTempFiles)
         {
             var rules = new List<CandidateRule>();
+            var selectedBrowserDataTypes = BuildBrowserDataTypeSet(browserDataTypes);
             string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             string windowsDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
             string windowsTemp = Path.Combine(windowsDirectory, "Temp");
@@ -128,10 +139,12 @@ namespace SweepCoreApp
                 RootPath = userTemp,
                 SearchPattern = "*",
                 Recursive = true,
-                MinAgeDays = 2,
+                MinAgeDays = includeRecentTempFiles ? 0 : 7,
                 MinSizeBytes = 1024,
                 Risk = ScanRisk.Safe,
-                Reason = "Temporary files from the user temp folder."
+                Reason = includeRecentTempFiles
+                    ? "Temporary files from the user temp folder."
+                    : "Temporary files from the user temp folder that are older than one week."
             });
 
             rules.Add(new CandidateRule
@@ -141,10 +154,12 @@ namespace SweepCoreApp
                 RootPath = windowsTemp,
                 SearchPattern = "*",
                 Recursive = true,
-                MinAgeDays = 2,
+                MinAgeDays = includeRecentTempFiles ? 0 : 7,
                 MinSizeBytes = 1024,
                 Risk = ScanRisk.Safe,
-                Reason = "Temporary files from the Windows temp folder."
+                Reason = includeRecentTempFiles
+                    ? "Temporary files from the Windows temp folder."
+                    : "Temporary files from the Windows temp folder that are older than one week."
             });
 
             rules.Add(new CandidateRule
@@ -173,26 +188,41 @@ namespace SweepCoreApp
                 Reason = "Temporary Windows error reports."
             });
 
-            AddChromiumCacheRules(
+            AddChromiumRules(
                 rules,
                 Path.Combine(localAppData, "Google", "Chrome", "User Data"),
-                "Chrome");
-            AddChromiumCacheRules(
+                "Chrome",
+                selectedBrowserDataTypes);
+            AddChromiumRules(
                 rules,
                 Path.Combine(localAppData, "Microsoft", "Edge", "User Data"),
-                "Edge");
-            AddChromiumCacheRules(
+                "Edge",
+                selectedBrowserDataTypes);
+            AddChromiumRules(
                 rules,
                 Path.Combine(localAppData, "BraveSoftware", "Brave-Browser", "User Data"),
-                "Brave");
-            AddFirefoxCacheRules(
+                "Brave",
+                selectedBrowserDataTypes);
+            AddFirefoxRules(
                 rules,
-                Path.Combine(localAppData, "Mozilla", "Firefox", "Profiles"));
+                Path.Combine(localAppData, "Mozilla", "Firefox", "Profiles"),
+                selectedBrowserDataTypes);
 
             return rules;
         }
 
-        private static void AddChromiumCacheRules(List<CandidateRule> rules, string userDataRoot, string browserName)
+        private static HashSet<BrowserDataType> BuildBrowserDataTypeSet(IEnumerable<BrowserDataType> browserDataTypes)
+        {
+            return browserDataTypes == null
+                ? new HashSet<BrowserDataType>(new[] { BrowserDataType.Cache })
+                : new HashSet<BrowserDataType>(browserDataTypes);
+        }
+
+        private static void AddChromiumRules(
+            List<CandidateRule> rules,
+            string userDataRoot,
+            string browserName,
+            HashSet<BrowserDataType> selectedBrowserDataTypes)
         {
             if (!Directory.Exists(userDataRoot))
             {
@@ -207,14 +237,132 @@ namespace SweepCoreApp
                     continue;
                 }
 
-                AddCacheRule(rules, browserName, profileName, Path.Combine(profileDirectory, "Cache", "Cache_Data"));
-                AddCacheRule(rules, browserName, profileName, Path.Combine(profileDirectory, "Code Cache"));
-                AddCacheRule(rules, browserName, profileName, Path.Combine(profileDirectory, "GPUCache"));
-                AddCacheRule(rules, browserName, profileName, Path.Combine(profileDirectory, "DawnCache"));
+                if (selectedBrowserDataTypes.Contains(BrowserDataType.Cache))
+                {
+                    AddCacheRule(rules, browserName, profileName, Path.Combine(profileDirectory, "Cache", "Cache_Data"));
+                    AddCacheRule(rules, browserName, profileName, Path.Combine(profileDirectory, "Code Cache"));
+                    AddCacheRule(rules, browserName, profileName, Path.Combine(profileDirectory, "GPUCache"));
+                    AddCacheRule(rules, browserName, profileName, Path.Combine(profileDirectory, "DawnCache"));
+                }
+
+                if (selectedBrowserDataTypes.Contains(BrowserDataType.Cookies))
+                {
+                    AddProfileFileRule(
+                        rules,
+                        browserName,
+                        profileName,
+                        profileDirectory,
+                        "Cookies",
+                        "Cookies",
+                        "Cookies keep website login sessions and site preferences. Removing them signs you out of many websites.");
+                    AddProfileFileRule(
+                        rules,
+                        browserName,
+                        profileName,
+                        Path.Combine(profileDirectory, "Network"),
+                        "Cookies",
+                        "Cookies",
+                        "Cookies keep website login sessions and site preferences. Removing them signs you out of many websites.");
+                    AddProfileFileRule(
+                        rules,
+                        browserName,
+                        profileName,
+                        profileDirectory,
+                        "Cookies-journal",
+                        "Cookies",
+                        "Cookie database journal file.");
+                    AddProfileFileRule(
+                        rules,
+                        browserName,
+                        profileName,
+                        profileDirectory,
+                        "Cookies-wal",
+                        "Cookies",
+                        "Cookie database write-ahead log.");
+                    AddProfileFileRule(
+                        rules,
+                        browserName,
+                        profileName,
+                        profileDirectory,
+                        "Cookies-shm",
+                        "Cookies",
+                        "Cookie database shared-memory file.");
+                    AddProfileFileRule(
+                        rules,
+                        browserName,
+                        profileName,
+                        Path.Combine(profileDirectory, "Network"),
+                        "Cookies-journal",
+                        "Cookies",
+                        "Cookie database journal file.");
+                    AddProfileFileRule(
+                        rules,
+                        browserName,
+                        profileName,
+                        Path.Combine(profileDirectory, "Network"),
+                        "Cookies-wal",
+                        "Cookies",
+                        "Cookie database write-ahead log.");
+                    AddProfileFileRule(
+                        rules,
+                        browserName,
+                        profileName,
+                        Path.Combine(profileDirectory, "Network"),
+                        "Cookies-shm",
+                        "Cookies",
+                        "Cookie database shared-memory file.");
+                }
+
+                if (selectedBrowserDataTypes.Contains(BrowserDataType.History))
+                {
+                    AddProfileFileRule(
+                        rules,
+                        browserName,
+                        profileName,
+                        profileDirectory,
+                        "History",
+                        "History",
+                        "Browsing history database. Saved passwords are stored separately and are not included.");
+                    AddProfileFileRule(
+                        rules,
+                        browserName,
+                        profileName,
+                        profileDirectory,
+                        "History-journal",
+                        "History",
+                        "Browsing history database journal file.");
+                    AddProfileFileRule(
+                        rules,
+                        browserName,
+                        profileName,
+                        profileDirectory,
+                        "History-wal",
+                        "History",
+                        "Browsing history database write-ahead log.");
+                    AddProfileFileRule(
+                        rules,
+                        browserName,
+                        profileName,
+                        profileDirectory,
+                        "History-shm",
+                        "History",
+                        "Browsing history database shared-memory file.");
+                    AddProfileFileRule(
+                        rules,
+                        browserName,
+                        profileName,
+                        profileDirectory,
+                        "Visited Links",
+                        "History",
+                        "Visited-link state used by the browser.");
+                }
             }
         }
 
-        private static void AddFirefoxCacheRules(List<CandidateRule> rules, string profilesRoot)
+        private static void AddFirefoxRules(
+            List<CandidateRule> rules,
+            string profilesRoot,
+            HashSet<BrowserDataType> selectedBrowserDataTypes)
         {
             if (!Directory.Exists(profilesRoot))
             {
@@ -224,8 +372,47 @@ namespace SweepCoreApp
             foreach (string profileDirectory in EnumerateDirectoriesSafe(profilesRoot))
             {
                 string profileName = Path.GetFileName(profileDirectory);
-                AddFirefoxCacheRule(rules, profileName, Path.Combine(profileDirectory, "cache2", "entries"));
-                AddFirefoxCacheRule(rules, profileName, Path.Combine(profileDirectory, "startupCache"));
+                if (selectedBrowserDataTypes.Contains(BrowserDataType.Cache))
+                {
+                    AddFirefoxCacheRule(rules, profileName, Path.Combine(profileDirectory, "cache2", "entries"));
+                    AddFirefoxCacheRule(rules, profileName, Path.Combine(profileDirectory, "startupCache"));
+                }
+
+                if (selectedBrowserDataTypes.Contains(BrowserDataType.Cookies))
+                {
+                    AddProfileFileRule(
+                        rules,
+                        "Firefox",
+                        profileName,
+                        profileDirectory,
+                        "cookies.sqlite",
+                        "Cookies",
+                        "Cookies keep website login sessions and site preferences. Removing them signs you out of many websites.",
+                        true);
+                    AddProfileFileRule(
+                        rules,
+                        "Firefox",
+                        profileName,
+                        profileDirectory,
+                        "cookies.sqlite-wal",
+                        "Cookies",
+                        "Cookie database write-ahead log.",
+                        true);
+                    AddProfileFileRule(
+                        rules,
+                        "Firefox",
+                        profileName,
+                        profileDirectory,
+                        "cookies.sqlite-shm",
+                        "Cookies",
+                        "Cookie database shared-memory file.",
+                        true);
+                }
+
+                if (selectedBrowserDataTypes.Contains(BrowserDataType.History))
+                {
+                    AddFirefoxHistoryProtectedRule(rules, profileName, profileDirectory);
+                }
             }
         }
 
@@ -238,7 +425,7 @@ namespace SweepCoreApp
 
             rules.Add(new CandidateRule
             {
-                Section = BrowserCacheSection,
+                Section = BrowserDataSection,
                 Category = browserName + " Cache (" + profileName + ")",
                 RootPath = cacheRoot,
                 SearchPattern = "*",
@@ -259,7 +446,7 @@ namespace SweepCoreApp
 
             rules.Add(new CandidateRule
             {
-                Section = BrowserCacheSection,
+                Section = BrowserDataSection,
                 Category = "Firefox Cache (" + profileName + ")",
                 RootPath = cacheRoot,
                 SearchPattern = "*",
@@ -268,6 +455,65 @@ namespace SweepCoreApp
                 MinSizeBytes = 512,
                 Risk = ScanRisk.Safe,
                 Reason = "Only Firefox cache folders are included. Saved passwords, addresses, and form data are excluded."
+            });
+        }
+
+        private static void AddProfileFileRule(
+            List<CandidateRule> rules,
+            string browserName,
+            string profileName,
+            string rootPath,
+            string fileName,
+            string dataTypeLabel,
+            string reason,
+            bool allowProtectedExtensions = false)
+        {
+            if (!Directory.Exists(rootPath))
+            {
+                return;
+            }
+
+            string filePath = Path.Combine(rootPath, fileName);
+            if (!File.Exists(filePath))
+            {
+                return;
+            }
+
+            rules.Add(new CandidateRule
+            {
+                Section = BrowserDataSection,
+                Category = browserName + " " + dataTypeLabel + " (" + profileName + ")",
+                RootPath = rootPath,
+                SearchPattern = fileName,
+                Recursive = false,
+                MinAgeDays = 0,
+                MinSizeBytes = 1,
+                Risk = ScanRisk.Safe,
+                Reason = reason,
+                AllowProtectedExtensions = allowProtectedExtensions
+            });
+        }
+
+        private static void AddFirefoxHistoryProtectedRule(List<CandidateRule> rules, string profileName, string profileDirectory)
+        {
+            string historyDatabase = Path.Combine(profileDirectory, "places.sqlite");
+            if (!File.Exists(historyDatabase))
+            {
+                return;
+            }
+
+            rules.Add(new CandidateRule
+            {
+                Section = BrowserDataSection,
+                Category = "Firefox History (" + profileName + ")",
+                RootPath = profileDirectory,
+                SearchPattern = "places.sqlite",
+                Recursive = false,
+                MinAgeDays = 0,
+                MinSizeBytes = 1,
+                Risk = ScanRisk.Protected,
+                Reason = "Firefox stores browsing history together with bookmarks in places.sqlite, so SweepCore does not remove it.",
+                AllowProtectedExtensions = true
             });
         }
 
@@ -285,8 +531,23 @@ namespace SweepCoreApp
 
         private static IEnumerable<string> EnumerateFilesSafe(string rootPath, string searchPattern, bool recursive)
         {
+            string normalizedRoot;
+            try
+            {
+                normalizedRoot = NormalizeFullPath(rootPath);
+            }
+            catch
+            {
+                yield break;
+            }
+
+            if (IsReparsePoint(normalizedRoot))
+            {
+                yield break;
+            }
+
             var pending = new Queue<string>();
-            pending.Enqueue(rootPath);
+            pending.Enqueue(normalizedRoot);
 
             while (pending.Count > 0)
             {
@@ -304,7 +565,22 @@ namespace SweepCoreApp
 
                 foreach (var file in files)
                 {
-                    yield return file;
+                    string fullPath;
+                    try
+                    {
+                        fullPath = NormalizeFullPath(file);
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+
+                    if (IsReparsePoint(fullPath) || !IsSameOrUnderRoot(fullPath, normalizedRoot))
+                    {
+                        continue;
+                    }
+
+                    yield return fullPath;
                 }
 
                 if (!recursive)
@@ -322,7 +598,22 @@ namespace SweepCoreApp
 
                 foreach (var directory in directories)
                 {
-                    pending.Enqueue(directory);
+                    string fullPath;
+                    try
+                    {
+                        fullPath = NormalizeFullPath(directory);
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+
+                    if (IsReparsePoint(fullPath) || !IsSameOrUnderRoot(fullPath, normalizedRoot))
+                    {
+                        continue;
+                    }
+
+                    pending.Enqueue(fullPath);
                 }
             }
         }
@@ -331,7 +622,9 @@ namespace SweepCoreApp
         {
             try
             {
-                return Directory.EnumerateDirectories(rootPath, "*", SearchOption.TopDirectoryOnly).ToList();
+                return Directory.EnumerateDirectories(rootPath, "*", SearchOption.TopDirectoryOnly)
+                    .Where(item => !IsReparsePoint(item))
+                    .ToList();
             }
             catch
             {
@@ -339,12 +632,12 @@ namespace SweepCoreApp
             }
         }
 
-        private static bool IsProtected(string path)
+        private static bool IsProtected(string path, bool allowProtectedExtensions)
         {
             string fullPath;
             try
             {
-                fullPath = Path.GetFullPath(path);
+                fullPath = NormalizeFullPath(path);
             }
             catch
             {
@@ -377,10 +670,15 @@ namespace SweepCoreApp
                     continue;
                 }
 
-                if (fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                if (IsSameOrUnderRoot(fullPath, root))
                 {
                     return true;
                 }
+            }
+
+            if (allowProtectedExtensions)
+            {
+                return false;
             }
 
             string extension = Path.GetExtension(fullPath);
@@ -393,6 +691,72 @@ namespace SweepCoreApp
             };
 
             return protectedExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static bool IsSameOrUnderRoot(string path, string root)
+        {
+            if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(root))
+            {
+                return false;
+            }
+
+            string normalizedPath;
+            string normalizedRoot;
+            try
+            {
+                normalizedPath = NormalizeFullPath(path);
+                normalizedRoot = NormalizeFullPath(root);
+            }
+            catch
+            {
+                return false;
+            }
+
+            if (string.Equals(normalizedPath, normalizedRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            string rootWithSeparator = EnsureTrailingDirectorySeparator(normalizedRoot);
+            return normalizedPath.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string NormalizeFullPath(string path)
+        {
+            string fullPath = Path.GetFullPath(path);
+            string root = Path.GetPathRoot(fullPath);
+
+            while (fullPath.Length > root.Length &&
+                   (fullPath.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal) ||
+                    fullPath.EndsWith(Path.AltDirectorySeparatorChar.ToString(), StringComparison.Ordinal)))
+            {
+                fullPath = fullPath.Substring(0, fullPath.Length - 1);
+            }
+
+            return fullPath;
+        }
+
+        private static string EnsureTrailingDirectorySeparator(string path)
+        {
+            if (path.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal) ||
+                path.EndsWith(Path.AltDirectorySeparatorChar.ToString(), StringComparison.Ordinal))
+            {
+                return path;
+            }
+
+            return path + Path.DirectorySeparatorChar;
+        }
+
+        private static bool IsReparsePoint(string path)
+        {
+            try
+            {
+                return (File.GetAttributes(path) & FileAttributes.ReparsePoint) == FileAttributes.ReparsePoint;
+            }
+            catch
+            {
+                return true;
+            }
         }
 
         private static ScanEntry BuildProtectedEntry(string path, string section, string category)

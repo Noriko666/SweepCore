@@ -44,6 +44,7 @@ namespace SweepCoreApp
         private const string AssetUiStartupIcon = "sweepcore-ui-icon-startup.png";
         private const string AssetUiRefreshIcon = "sweepcore-ui-icon-refresh.png";
         private const string AssetUiPatternTile = "sweepcore-ui-pattern-tile.png";
+        private const string AppIconFileName = "sweepcore.ico";
         private const int DwmUseImmersiveDarkMode = 20;
         private const int DwmUseImmersiveDarkModeLegacy = 19;
         private const int DwmWindowCornerPreference = 33;
@@ -69,8 +70,10 @@ namespace SweepCoreApp
         private readonly SystemInfoService systemInfoService;
         private readonly ObservableCollection<InstalledAppInfo> visibleApps;
         private readonly HashSet<string> selectedCleanupTargets;
+        private readonly HashSet<BrowserDataType> selectedBrowserDataTypes;
         private readonly Dictionary<NavigationSection, Button> navigationButtons;
         private readonly Dictionary<string, ImageSource> assetImageCache;
+        private bool includeRecentTempFiles;
 
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(
@@ -80,6 +83,7 @@ namespace SweepCoreApp
             int cbAttribute);
 
         private ContentControl pageHost;
+        private FrameworkElement headerShell;
         private TextBlock headerEyebrowText;
         private TextBlock headerDeviceText;
         private TextBlock headerMetaText;
@@ -172,8 +176,13 @@ namespace SweepCoreApp
             systemInfoService = new SystemInfoService();
             visibleApps = new ObservableCollection<InstalledAppInfo>();
             selectedCleanupTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            selectedBrowserDataTypes = new HashSet<BrowserDataType>
+            {
+                BrowserDataType.Cache
+            };
             navigationButtons = new Dictionary<NavigationSection, Button>();
             assetImageCache = new Dictionary<string, ImageSource>(StringComparer.OrdinalIgnoreCase);
+            includeRecentTempFiles = false;
             allInstalledApps = new List<InstalledAppInfo>();
             allStartupItems = new List<StartupItemInfo>();
             visibleStartupItems = new List<StartupItemInfo>();
@@ -183,12 +192,12 @@ namespace SweepCoreApp
             startupSearchQuery = string.Empty;
             selectedAppsFilterKey = "all";
             selectedStartupFilterKey = "all";
-            selectedAppsSortKey = "name";
+            selectedAppsSortKey = "date_desc";
             currentStatusMessage = "Loading workspace...";
             isDarkMode = true;
             activeSection = NavigationSection.Cleanup;
 
-            Title = "SweepCore 1.0";
+            Title = "SweepCore 1.1";
             Width = 1520;
             Height = 930;
             MinWidth = 1260;
@@ -196,6 +205,7 @@ namespace SweepCoreApp
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             FontFamily = new FontFamily("Segoe UI");
             Background = WindowBackgroundBrush();
+            ApplyApplicationIcon();
             Content = BuildShell();
 
             SourceInitialized += delegate { ApplyWindowFrameTheme(); };
@@ -237,7 +247,8 @@ namespace SweepCoreApp
             DockPanel.SetDock(statusBar, Dock.Bottom);
             mainDock.Children.Add(statusBar);
 
-            var header = BuildHeader();
+            headerShell = BuildHeader() as FrameworkElement;
+            var header = headerShell;
             DockPanel.SetDock(header, Dock.Top);
             mainDock.Children.Add(header);
 
@@ -253,6 +264,28 @@ namespace SweepCoreApp
             UpdateStatusBarState();
 
             return root;
+        }
+
+        private void ApplyApplicationIcon()
+        {
+            try
+            {
+                string iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", AppIconFileName);
+                if (!File.Exists(iconPath))
+                {
+                    return;
+                }
+
+                var icon = BitmapFrame.Create(
+                    new Uri(iconPath, UriKind.Absolute),
+                    BitmapCreateOptions.PreservePixelFormat,
+                    BitmapCacheOption.OnLoad);
+                icon.Freeze();
+                Icon = icon;
+            }
+            catch
+            {
+            }
         }
 
         private UIElement BuildSidebar()
@@ -592,7 +625,7 @@ namespace SweepCoreApp
                 hasScanRun ? string.Format("{0} cleanable item(s) found.", currentSnapshot.CleanableCount) : "Run a scan to populate this card."));
             metrics.Children.Add(BuildMetricCard(
                 currentSnapshot == null ? "--" : SizeFormatter.Format(currentSnapshot.BrowserCacheBytes),
-                "Browser cache",
+                "Browser data",
                 currentSnapshot == null ? "Waiting for results." : string.Format("{0} cache item(s) across supported browsers.", currentSnapshot.BrowserCacheCount)));
             metrics.Children.Add(BuildMetricCard(
                 currentSnapshot == null ? "--" : string.Format("{0:0}%", currentSnapshot.SystemDriveUsagePercent),
@@ -719,7 +752,7 @@ namespace SweepCoreApp
             {
                 Text = hasScanRun
                     ? "Open Cleanup to review the target cards and start with the selected areas only."
-                    : "The first scan inspects temporary files and browser cache only. Nothing is deleted during the scan.",
+                    : "The first scan inspects temporary files and the selected browser data. Nothing is deleted during the scan.",
                 Margin = new Thickness(0, 10, 0, 0),
                 FontSize = 12,
                 TextWrapping = TextWrapping.Wrap,
@@ -765,7 +798,12 @@ namespace SweepCoreApp
                 "How cleanup works",
                 "The flow is intentionally simple so the next action is always obvious."));
 
-            stack.Children.Add(BuildStepRow("01", "Scan", "Inspect temp folders and supported browser cache locations."));
+            stack.Children.Add(BuildStepRow(
+                "01",
+                "Scan",
+                includeRecentTempFiles
+                    ? "Inspect all temp files and selected browser data locations."
+                    : "Inspect temp files older than one week and selected browser data locations."));
             stack.Children.Add(BuildStepRow("02", "Select", "Use the large target cards to decide which areas should be cleaned."));
             stack.Children.Add(BuildStepRow("03", "Clean", "Move selected files to the Recycle Bin and write an action log."));
 
@@ -862,6 +900,11 @@ namespace SweepCoreApp
 
         private UIElement BuildCleanupSection()
         {
+            if (!hasScanRun)
+            {
+                return BuildCleanupPreScanSection();
+            }
+
             var scroll = new ScrollViewer
             {
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto
@@ -873,13 +916,21 @@ namespace SweepCoreApp
             };
             scroll.Content = root;
 
-            root.Children.Add(BuildCleanupIntroCard());
-
-            if (!hasScanRun)
+            var tempOptionsCard = BuildTempCleanupOptionsCard();
+            var tempOptionsElement = tempOptionsCard as FrameworkElement;
+            if (tempOptionsElement != null)
             {
-                root.Children.Add(BuildCleanupStartCard());
-                return scroll;
+                tempOptionsElement.Margin = new Thickness(0, 0, 0, 0);
             }
+            root.Children.Add(tempOptionsCard);
+
+            var browserOptionsCard = BuildBrowserDataOptionsCard();
+            var browserOptionsElement = browserOptionsCard as FrameworkElement;
+            if (browserOptionsElement != null)
+            {
+                browserOptionsElement.Margin = new Thickness(0, 18, 0, 0);
+            }
+            root.Children.Add(browserOptionsCard);
 
             var layout = new Grid
             {
@@ -917,6 +968,128 @@ namespace SweepCoreApp
             root.Children.Add(previewCard);
 
             return scroll;
+        }
+
+        private UIElement BuildCleanupPreScanSection()
+        {
+            var root = new Grid
+            {
+                Margin = new Thickness(0, 0, 0, 8)
+            };
+            root.RowDefinitions.Add(new RowDefinition
+            {
+                Height = GridLength.Auto
+            });
+            root.RowDefinitions.Add(new RowDefinition
+            {
+                Height = new GridLength(1, GridUnitType.Star)
+            });
+
+            var startCard = CreateCardShell();
+            startCard.Padding = new Thickness(22);
+            startCard.Margin = new Thickness(0, 0, 0, 14);
+            Grid.SetRow(startCard, 0);
+            root.Children.Add(startCard);
+
+            var startGrid = new Grid();
+            startGrid.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = new GridLength(1, GridUnitType.Star)
+            });
+            startGrid.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = GridLength.Auto
+            });
+            startCard.Child = startGrid;
+
+            var titleStack = new StackPanel
+            {
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(titleStack, 0);
+            startGrid.Children.Add(titleStack);
+
+            titleStack.Children.Add(new TextBlock
+            {
+                Text = "Clean up",
+                FontFamily = HeadingFontFamily(),
+                FontSize = 34,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = PrimaryTextBrush()
+            });
+
+            titleStack.Children.Add(new TextBlock
+            {
+                Text = "Choose temp and browser options, then start the scan.",
+                Margin = new Thickness(0, 6, 0, 0),
+                FontSize = 14,
+                FontWeight = FontWeights.SemiBold,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = AccentBrush()
+            });
+
+            titleStack.Children.Add(new TextBlock
+            {
+                Text = "Nothing is deleted during the scan. Cleanup still requires a separate confirmation.",
+                Margin = new Thickness(0, 8, 0, 0),
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = SecondaryTextBrush()
+            });
+
+            var actionGrid = new Grid
+            {
+                Width = 360,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            actionGrid.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = new GridLength(1, GridUnitType.Star)
+            });
+            actionGrid.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = new GridLength(1, GridUnitType.Star)
+            });
+            Grid.SetColumn(actionGrid, 1);
+            startGrid.Children.Add(actionGrid);
+
+            var scanButton = BuildPrimaryButton("1. Start scan", true);
+            scanButton.Click += delegate { RefreshScanOnly(); };
+            Grid.SetColumn(scanButton, 0);
+            actionGrid.Children.Add(scanButton);
+
+            var chooseButton = BuildGhostButton("2. Choose areas", true);
+            chooseButton.Margin = new Thickness(12, 0, 0, 0);
+            chooseButton.IsEnabled = false;
+            Grid.SetColumn(chooseButton, 1);
+            actionGrid.Children.Add(chooseButton);
+
+            var optionsGrid = new Grid();
+            optionsGrid.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = new GridLength(0.86, GridUnitType.Star)
+            });
+            optionsGrid.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = new GridLength(1.54, GridUnitType.Star)
+            });
+            Grid.SetRow(optionsGrid, 1);
+            root.Children.Add(optionsGrid);
+
+            var tempOptions = BuildTempCleanupOptionsCard();
+            Grid.SetColumn(tempOptions, 0);
+            optionsGrid.Children.Add(tempOptions);
+
+            var browserOptions = BuildBrowserDataOptionsCard();
+            var browserElement = browserOptions as FrameworkElement;
+            if (browserElement != null)
+            {
+                browserElement.Margin = new Thickness(14, 0, 0, 0);
+            }
+            Grid.SetColumn(browserOptions, 1);
+            optionsGrid.Children.Add(browserOptions);
+
+            return root;
         }
 
         private UIElement BuildCleanupIntroCard()
@@ -1129,6 +1302,139 @@ namespace SweepCoreApp
             return card;
         }
 
+        private UIElement BuildTempCleanupOptionsCard()
+        {
+            var card = CreateCardShell();
+            var stack = new StackPanel();
+            card.Child = stack;
+
+            stack.Children.Add(BuildCardHeader(
+                "Temp cleanup options",
+                "Choose how aggressively temporary folders should be scanned."));
+
+            var border = new Border
+            {
+                Margin = new Thickness(0, 12, 0, 0),
+                Padding = new Thickness(14),
+                Background = includeRecentTempFiles ? SelectedTileBackgroundBrush() : SurfaceMutedBrush(),
+                BorderBrush = includeRecentTempFiles ? AccentBrush() : OutlineBrush(),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(14)
+            };
+            stack.Children.Add(border);
+
+            var optionStack = new StackPanel();
+            border.Child = optionStack;
+
+            var checkBox = new CheckBox
+            {
+                Content = "Clean all temp files",
+                IsChecked = includeRecentTempFiles,
+                IsEnabled = !operationInProgress,
+                FontSize = 14,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = PrimaryTextBrush()
+            };
+            checkBox.Checked += delegate { SetIncludeRecentTempFiles(true); };
+            checkBox.Unchecked += delegate { SetIncludeRecentTempFiles(false); };
+            optionStack.Children.Add(checkBox);
+
+            optionStack.Children.Add(new TextBlock
+            {
+                Text = includeRecentTempFiles
+                    ? "Includes recent temp files too. Protected file types and files in use are still skipped."
+                    : "Default mode only includes temp files older than one week.",
+                Margin = new Thickness(0, 8, 0, 0),
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = SecondaryTextBrush()
+            });
+
+            return card;
+        }
+
+        private UIElement BuildBrowserDataOptionsCard()
+        {
+            var card = CreateCardShell();
+            var stack = new StackPanel();
+            card.Child = stack;
+
+            stack.Children.Add(BuildCardHeader(
+                "Browser cleanup options",
+                "Choose what browser data the next scan should include."));
+
+            var optionPanel = new UniformGrid
+            {
+                Columns = 3,
+                Margin = new Thickness(0, 12, 0, 0)
+            };
+            stack.Children.Add(optionPanel);
+
+            optionPanel.Children.Add(BuildBrowserDataOption(
+                BrowserDataType.Cache,
+                "Cache",
+                "Temporary web files. Usually safe to remove."));
+            optionPanel.Children.Add(BuildBrowserDataOption(
+                BrowserDataType.Cookies,
+                "Cookies",
+                "Signs you out of many websites. Passwords stay untouched."));
+            optionPanel.Children.Add(BuildBrowserDataOption(
+                BrowserDataType.History,
+                "History",
+                "Removes browsing history where it can be done safely."));
+
+            stack.Children.Add(new TextBlock
+            {
+                Text = "Saved passwords, autofill data, bookmarks, and personal files are never selected.",
+                Margin = new Thickness(0, 12, 0, 0),
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = SecondaryTextBrush()
+            });
+
+            return card;
+        }
+
+        private UIElement BuildBrowserDataOption(BrowserDataType dataType, string title, string description)
+        {
+            var border = new Border
+            {
+                Margin = new Thickness(0, 0, 10, 0),
+                Padding = new Thickness(14),
+                Background = selectedBrowserDataTypes.Contains(dataType) ? SelectedTileBackgroundBrush() : SurfaceMutedBrush(),
+                BorderBrush = selectedBrowserDataTypes.Contains(dataType) ? AccentBrush() : OutlineBrush(),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(14)
+            };
+
+            var stack = new StackPanel();
+            border.Child = stack;
+
+            var checkBox = new CheckBox
+            {
+                Content = title,
+                IsChecked = selectedBrowserDataTypes.Contains(dataType),
+                IsEnabled = !operationInProgress,
+                FontSize = 14,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = PrimaryTextBrush()
+            };
+            checkBox.Checked += delegate { SetBrowserDataOption(dataType, true); };
+            checkBox.Unchecked += delegate { SetBrowserDataOption(dataType, false); };
+            stack.Children.Add(checkBox);
+
+            stack.Children.Add(new TextBlock
+            {
+                Text = description,
+                Margin = new Thickness(0, 8, 0, 0),
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = SecondaryTextBrush()
+            });
+
+            return border;
+        }
+
         private UIElement BuildCleanupStartCard()
         {
             var card = CreateCardShell();
@@ -1212,8 +1518,8 @@ namespace SweepCoreApp
                 "These notes are always visible so the user does not have to remember hidden rules."));
 
             stack.Children.Add(BuildHintRow("Recycle Bin", "Selected files are moved to the Recycle Bin, not permanently deleted."));
-            stack.Children.Add(BuildHintRow("Browsers", "If browser cache is selected, supported browsers are closed before cleanup begins."));
-            stack.Children.Add(BuildHintRow("Excluded data", "Passwords, saved forms, personal files, archives, and database files remain blocked."));
+            stack.Children.Add(BuildHintRow("Browsers", "If browser data is selected, supported browsers are closed before cleanup begins."));
+            stack.Children.Add(BuildHintRow("Excluded data", "Passwords, saved forms, bookmarks, personal files, archives, and unrelated databases remain blocked."));
             stack.Children.Add(BuildHintRow("Last action", string.IsNullOrWhiteSpace(lastActionMessage) ? "No cleanup has been run yet." : lastActionMessage));
 
             return card;
@@ -1348,17 +1654,17 @@ namespace SweepCoreApp
 
             appsSortComboBox = BuildAppsOptionComboBox(new[]
             {
+                CreateOption("date_desc", "Sort: Newest"),
                 CreateOption("name", "Sort: Name"),
                 CreateOption("size_desc", "Sort: Largest"),
                 CreateOption("size_asc", "Sort: Smallest"),
-                CreateOption("date_desc", "Sort: Newest"),
                 CreateOption("date_asc", "Sort: Oldest")
             }, selectedAppsSortKey);
             appsSortComboBox.Margin = new Thickness(12, 0, 0, 0);
             appsSortComboBox.SelectionChanged += delegate
             {
                 var selected = appsSortComboBox.SelectedItem as SelectionOption;
-                selectedAppsSortKey = selected == null ? "name" : selected.Key;
+                selectedAppsSortKey = selected == null ? "date_desc" : selected.Key;
                 ApplyAppFilter();
             };
             Grid.SetColumn(appsSortComboBox, 4);
@@ -2258,15 +2564,7 @@ namespace SweepCoreApp
 
             try
             {
-                var startInfo = new ProcessStartInfo
-                {
-                    FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe",
-                    Arguments = "/c start \"\" " + app.UninstallCommand,
-                    UseShellExecute = false,
-                    CreateNoWindow = false,
-                    WorkingDirectory = Environment.SystemDirectory
-                };
-
+                var startInfo = BuildUninstallerStartInfo(app.UninstallCommand);
                 Process.Start(startInfo);
                 currentStatusMessage = "Uninstaller for " + app.Name + " started. The list will refresh automatically.";
                 lastActionMessage = "Uninstaller for " + app.Name + " started.";
@@ -2277,6 +2575,142 @@ namespace SweepCoreApp
             {
                 currentStatusMessage = "Could not start the uninstaller: " + ex.Message;
                 UpdateStatusBarState();
+            }
+        }
+
+        private static ProcessStartInfo BuildUninstallerStartInfo(string uninstallCommand)
+        {
+            string executablePath;
+            string arguments;
+
+            if (!TrySplitCommandLine(uninstallCommand, out executablePath, out arguments))
+            {
+                throw new InvalidOperationException("The registered uninstall command is empty or invalid.");
+            }
+
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = executablePath,
+                Arguments = arguments,
+                UseShellExecute = true,
+                WorkingDirectory = Environment.SystemDirectory
+            };
+
+            string workingDirectory = GetExistingWorkingDirectory(executablePath);
+            if (!string.IsNullOrWhiteSpace(workingDirectory))
+            {
+                startInfo.WorkingDirectory = workingDirectory;
+            }
+
+            return startInfo;
+        }
+
+        private static bool TrySplitCommandLine(string commandLine, out string executablePath, out string arguments)
+        {
+            executablePath = string.Empty;
+            arguments = string.Empty;
+
+            if (string.IsNullOrWhiteSpace(commandLine))
+            {
+                return false;
+            }
+
+            string value = Environment.ExpandEnvironmentVariables(commandLine.Trim());
+
+            if (value.StartsWith("\"", StringComparison.Ordinal))
+            {
+                int closingQuote = value.IndexOf('"', 1);
+                if (closingQuote <= 1)
+                {
+                    return false;
+                }
+
+                executablePath = value.Substring(1, closingQuote - 1).Trim();
+                arguments = value.Substring(closingQuote + 1).Trim();
+                return !string.IsNullOrWhiteSpace(executablePath);
+            }
+
+            int executableEnd = FindExecutableEnd(value);
+            if (executableEnd <= 0)
+            {
+                executableEnd = IndexOfWhiteSpace(value);
+            }
+
+            if (executableEnd <= 0)
+            {
+                executablePath = value.Trim();
+                return !string.IsNullOrWhiteSpace(executablePath);
+            }
+
+            executablePath = value.Substring(0, executableEnd).Trim();
+            arguments = value.Substring(executableEnd).Trim();
+            return !string.IsNullOrWhiteSpace(executablePath);
+        }
+
+        private static int FindExecutableEnd(string value)
+        {
+            string[] executableExtensions = { ".exe", ".msi", ".cmd", ".bat", ".com" };
+            int bestEnd = -1;
+
+            foreach (string extension in executableExtensions)
+            {
+                int searchIndex = 0;
+                while (searchIndex < value.Length)
+                {
+                    int matchIndex = value.IndexOf(extension, searchIndex, StringComparison.OrdinalIgnoreCase);
+                    if (matchIndex < 0)
+                    {
+                        break;
+                    }
+
+                    int candidateEnd = matchIndex + extension.Length;
+                    bool isBoundary = candidateEnd == value.Length ||
+                                      char.IsWhiteSpace(value[candidateEnd]) ||
+                                      value[candidateEnd] == '/' ||
+                                      value[candidateEnd] == '-';
+
+                    if (isBoundary && (bestEnd < 0 || candidateEnd < bestEnd))
+                    {
+                        bestEnd = candidateEnd;
+                    }
+
+                    searchIndex = matchIndex + 1;
+                }
+            }
+
+            return bestEnd;
+        }
+
+        private static int IndexOfWhiteSpace(string value)
+        {
+            for (int i = 0; i < value.Length; i++)
+            {
+                if (char.IsWhiteSpace(value[i]))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        private static string GetExistingWorkingDirectory(string executablePath)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(executablePath) || !Path.IsPathRooted(executablePath))
+                {
+                    return string.Empty;
+                }
+
+                string directory = Path.GetDirectoryName(executablePath);
+                return !string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory)
+                    ? directory
+                    : string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
             }
         }
 
@@ -2580,9 +3014,11 @@ namespace SweepCoreApp
                 BeginOperation("Scan is running...", "Preparing scan...", true, 0, 0);
 
                 var progress = new Progress<OperationProgressInfo>(UpdateOperationProgress);
+                var browserDataTypes = selectedBrowserDataTypes.ToList();
+                bool scanRecentTempFiles = includeRecentTempFiles;
                 var scanResult = await Task.Run(delegate
                 {
-                    return scanService.Run(progress);
+                    return scanService.Run(browserDataTypes, scanRecentTempFiles, progress);
                 });
 
                 allEntries = scanResult.Entries;
@@ -2608,6 +3044,57 @@ namespace SweepCoreApp
             catch (Exception ex)
             {
                 EndOperation("Scan failed: " + ex.Message);
+            }
+        }
+
+        private void SetIncludeRecentTempFiles(bool includeRecentFiles)
+        {
+            if (includeRecentTempFiles == includeRecentFiles)
+            {
+                return;
+            }
+
+            includeRecentTempFiles = includeRecentFiles;
+            ResetScanAfterCleanupOptionChange(
+                includeRecentFiles
+                    ? "Temp cleanup now includes recent temp files. Run a new scan."
+                    : "Temp cleanup now uses the one-week safety window. Run a new scan.");
+        }
+
+        private void SetBrowserDataOption(BrowserDataType dataType, bool isSelected)
+        {
+            bool changed = isSelected
+                ? selectedBrowserDataTypes.Add(dataType)
+                : selectedBrowserDataTypes.Remove(dataType);
+
+            if (!changed)
+            {
+                return;
+            }
+
+            ResetScanAfterCleanupOptionChange("Browser cleanup options changed. Run a new scan.");
+        }
+
+        private void ResetScanAfterCleanupOptionChange(string message)
+        {
+            if (hasScanRun)
+            {
+                allEntries = new List<ScanEntry>();
+                currentEntries = new List<ScanEntry>();
+                currentSnapshot = systemInfoService.Build(allInstalledApps, allEntries);
+                lastScanResult = null;
+                hasScanRun = false;
+                selectedCleanupTargets.Clear();
+                lastActionMessage = message;
+                currentStatusMessage = message + " Start a new scan to apply it.";
+                RenderCurrentSection();
+            }
+            else
+            {
+                currentStatusMessage = message;
+                RenderCurrentSection();
+                UpdateHeaderState();
+                UpdateStatusBarState();
             }
         }
 
@@ -3400,10 +3887,21 @@ namespace SweepCoreApp
         {
             bool isAppsSection = activeSection == NavigationSection.Apps;
             bool isStartupSection = activeSection == NavigationSection.Startup;
+            bool showHeader = isAppsSection || isStartupSection;
             var selectedEntries = GetSelectedEntries().ToList();
             long selectedBytes = selectedEntries.Sum(item => item.SizeBytes);
             int enabledStartupCount = allStartupItems.Count(item => item.IsEnabled);
             int disabledStartupCount = allStartupItems.Count - enabledStartupCount;
+
+            if (headerShell != null)
+            {
+                headerShell.Visibility = showHeader ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            if (pageHost != null)
+            {
+                pageHost.Margin = showHeader ? new Thickness(0, 22, 0, 0) : new Thickness(0);
+            }
 
             if (headerEyebrowText != null)
             {
@@ -3696,29 +4194,49 @@ namespace SweepCoreApp
 
             long totalBytes = selectedEntries.Sum(item => item.SizeBytes);
             var browserProcesses = BrowserProcessService.GetRequiredBrowserProcesses(selectedEntries);
-            bool containsBrowserCache = browserProcesses.Count > 0;
+            bool containsBrowserData = browserProcesses.Count > 0;
+            bool containsCookies = selectedEntries.Any(IsCookieEntry);
+            bool containsHistory = selectedEntries.Any(IsHistoryEntry);
 
             string confirmMessage;
-            if (containsBrowserCache)
+            if (containsBrowserData)
             {
                 string browserLabels = BrowserProcessService.BuildBrowserLabelSummary(browserProcesses);
+                var warningLines = new List<string>();
+                if (containsCookies)
+                {
+                    warningLines.Add("Cookies: you will be signed out of many websites. Saved passwords are not deleted.");
+                }
+
+                if (containsHistory)
+                {
+                    warningLines.Add("History: browsing history will be removed where the browser stores it separately. Saved passwords are not deleted.");
+                }
+
+                string extraWarnings = warningLines.Count == 0
+                    ? string.Empty
+                    : "\n\n" + string.Join("\n", warningLines);
+
                 confirmMessage = string.Format(
-                    "Browser cache can only be cleaned if the browser is closed.\n\nPress OK to close these browsers automatically: {0}\n\nSelected items: {1}\nSelected size: {2}\n\nPlease save any open browser data first.",
+                    "Browser data can only be cleaned after open browsers are closed.\n\nIf any of these browsers are running, SweepCore will ask Windows to close them now: {0}\n\nClick OK to confirm. Please save any open browser work first.\n\nSweepCore will not force-close browsers. Cleanup stops if a browser does not close.{1}\n\nSelected items: {2}\nSelected size: {3}",
                     browserLabels,
+                    extraWarnings,
                     selectedEntries.Count,
                     SizeFormatter.Format(totalBytes));
             }
             else
             {
                 confirmMessage = string.Format(
-                    "Move {0} selected items to the Recycle Bin?\n\nSelected size: {1}\n\nOnly temporary files will be cleaned.",
+                    includeRecentTempFiles
+                        ? "Move {0} selected items to the Recycle Bin?\n\nSelected size: {1}\n\nAll matching temp files are included. Protected file types and files in use are still skipped."
+                        : "Move {0} selected items to the Recycle Bin?\n\nSelected size: {1}\n\nOnly temporary files older than one week will be cleaned.",
                     selectedEntries.Count,
                     SizeFormatter.Format(totalBytes));
             }
 
             var confirm = MessageBox.Show(
                 confirmMessage,
-                containsBrowserCache ? "Close browsers and continue" : "Confirm cleanup",
+                containsBrowserData ? "Close browsers and continue" : "Confirm cleanup",
                 MessageBoxButton.OKCancel,
                 MessageBoxImage.Warning);
 
@@ -3729,7 +4247,7 @@ namespace SweepCoreApp
                 return;
             }
 
-            if (containsBrowserCache)
+            if (containsBrowserData)
             {
                 BeginOperation("Preparing browsers...", "Closing browsers...", true, 0, 0);
 
@@ -3876,28 +4394,28 @@ namespace SweepCoreApp
             if (string.Equals(key, TargetChrome, StringComparison.OrdinalIgnoreCase))
             {
                 return allEntries.Where(item =>
-                    string.Equals(item.Section, "Browser Cache", StringComparison.OrdinalIgnoreCase) &&
+                    IsBrowserDataSection(item.Section) &&
                     item.Category.StartsWith("Chrome", StringComparison.OrdinalIgnoreCase));
             }
 
             if (string.Equals(key, TargetEdge, StringComparison.OrdinalIgnoreCase))
             {
                 return allEntries.Where(item =>
-                    string.Equals(item.Section, "Browser Cache", StringComparison.OrdinalIgnoreCase) &&
+                    IsBrowserDataSection(item.Section) &&
                     item.Category.StartsWith("Edge", StringComparison.OrdinalIgnoreCase));
             }
 
             if (string.Equals(key, TargetBrave, StringComparison.OrdinalIgnoreCase))
             {
                 return allEntries.Where(item =>
-                    string.Equals(item.Section, "Browser Cache", StringComparison.OrdinalIgnoreCase) &&
+                    IsBrowserDataSection(item.Section) &&
                     item.Category.StartsWith("Brave", StringComparison.OrdinalIgnoreCase));
             }
 
             if (string.Equals(key, TargetFirefox, StringComparison.OrdinalIgnoreCase))
             {
                 return allEntries.Where(item =>
-                    string.Equals(item.Section, "Browser Cache", StringComparison.OrdinalIgnoreCase) &&
+                    IsBrowserDataSection(item.Section) &&
                     item.Category.StartsWith("Firefox", StringComparison.OrdinalIgnoreCase));
             }
 
@@ -3964,14 +4482,36 @@ namespace SweepCoreApp
             return key;
         }
 
-        private static string GetCleanupTargetDescription(string key)
+        private string GetCleanupTargetDescription(string key)
         {
             if (string.Equals(key, TargetTemp, StringComparison.OrdinalIgnoreCase))
             {
-                return "User temp, Windows temp, crash dumps, and Windows error reports.";
+                return includeRecentTempFiles
+                    ? "All matching User temp and Windows temp files, plus crash dumps and Windows error reports."
+                    : "User temp and Windows temp older than one week, plus crash dumps and Windows error reports.";
             }
 
-            return "Cache only. Passwords, saved addresses, forms, and profile data stay untouched.";
+            return "Selected browser data only. Passwords, autofill, bookmarks, and profile data stay untouched.";
+        }
+
+        private static bool IsBrowserDataSection(string section)
+        {
+            return string.Equals(section, "Browser Cache", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(section, "Browser Data", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsCookieEntry(ScanEntry entry)
+        {
+            return entry != null &&
+                   IsBrowserDataSection(entry.Section) &&
+                   (entry.Category ?? string.Empty).IndexOf("Cookies", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool IsHistoryEntry(ScanEntry entry)
+        {
+            return entry != null &&
+                   IsBrowserDataSection(entry.Section) &&
+                   (entry.Category ?? string.Empty).IndexOf("History", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private UIElement BuildLogoVisual(double size)
@@ -4426,7 +4966,6 @@ namespace SweepCoreApp
             }
 
             operationProgressBorder.Visibility = Visibility.Visible;
-            operationText.Text = string.IsNullOrWhiteSpace(info.Message) ? "Working..." : info.Message;
             operationProgressBar.IsIndeterminate = info.IsIndeterminate;
 
             if (!info.IsIndeterminate)
@@ -4441,11 +4980,32 @@ namespace SweepCoreApp
                 operationProgressBar.Minimum = 0;
                 operationProgressBar.Maximum = safeTotal;
                 operationProgressBar.Value = safeCurrent;
+                operationText.Text = BuildProgressText(info.Message, safeCurrent, safeTotal);
             }
             else
             {
+                operationText.Text = string.IsNullOrWhiteSpace(info.Message) ? "Working..." : info.Message;
                 operationProgressBar.Value = 0;
             }
+        }
+
+        private static string BuildProgressText(string message, int current, int total)
+        {
+            string baseMessage = string.IsNullOrWhiteSpace(message) ? "Working..." : message;
+            int safeTotal = total <= 0 ? 1 : total;
+            int safeCurrent = current < 0 ? 0 : current;
+            if (safeCurrent > safeTotal)
+            {
+                safeCurrent = safeTotal;
+            }
+
+            double percent = safeTotal == 0 ? 0 : (safeCurrent * 100.0) / safeTotal;
+            return string.Format(
+                "{0} - {1:N0} of {2:N0} ({3:0}%)",
+                baseMessage,
+                safeCurrent,
+                safeTotal,
+                percent);
         }
 
         private void EndOperation(string statusMessage)

@@ -4,6 +4,7 @@ $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $sourceDir = Join-Path $root "SweepCoreApp"
 $outputDir = Join-Path $root "bin"
 $assetsDir = Join-Path $root "Assets"
+$iconFile = Join-Path $assetsDir "sweepcore.ico"
 $compiler = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 $references = @(
     "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\mscorlib.dll",
@@ -21,6 +22,10 @@ if (-not (Test-Path -LiteralPath $compiler)) {
     throw "Compiler not found: $compiler"
 }
 
+if (-not (Test-Path -LiteralPath $iconFile)) {
+    throw "Application icon not found: $iconFile"
+}
+
 New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
 
 $sourceFiles = Get-ChildItem -LiteralPath $sourceDir -Filter *.cs | Select-Object -ExpandProperty FullName
@@ -33,6 +38,7 @@ $args = @(
     "/target:winexe",
     "/platform:anycpu",
     "/optimize+",
+    "/win32icon:$iconFile",
     "/out:$outputDir\\SweepCore.exe"
 )
 

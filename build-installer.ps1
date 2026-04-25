@@ -6,6 +6,7 @@ $installerSource = Join-Path $root "Installer\SweepCoreSetupProgram.cs"
 $appBuildScript = Join-Path $root "build.ps1"
 $appBinary = Join-Path $root "bin\SweepCore.exe"
 $logoFile = Join-Path $root "Assets\sweepcore-hero-logo.png"
+$iconFile = Join-Path $root "Assets\sweepcore.ico"
 $compiler = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 
 if (-not (Test-Path -LiteralPath $compiler)) {
@@ -33,6 +34,10 @@ if (-not (Test-Path -LiteralPath $logoFile)) {
     throw "Logo asset not found: $logoFile"
 }
 
+if (-not (Test-Path -LiteralPath $iconFile)) {
+    throw "Icon asset not found: $iconFile"
+}
+
 New-Item -ItemType Directory -Force -Path $distDir | Out-Null
 
 $outputFile = Join-Path $distDir "SweepCoreSetup.exe"
@@ -49,9 +54,11 @@ $args = @(
     "/target:winexe",
     "/platform:anycpu",
     "/optimize+",
+    "/win32icon:$iconFile",
     "/out:$outputFile",
     "/resource:$appBinary,SweepCore.Payload.SweepCore.exe",
     "/resource:$logoFile,SweepCore.Payload.sweepcore-hero-logo.png",
+    "/resource:$iconFile,SweepCore.Payload.sweepcore.ico",
     $installerSource
 )
 

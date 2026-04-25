@@ -11,6 +11,7 @@
         public ScanRisk Risk { get; set; }
         public string Reason { get; set; }
         public long MinSizeBytes { get; set; }
+        public bool AllowProtectedExtensions { get; set; }
     }
 }
 

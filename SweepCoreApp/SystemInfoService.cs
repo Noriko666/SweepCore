@@ -27,9 +27,9 @@ namespace SweepCoreApp
                 TempFileBytes = entries
                     .Where(item => string.Equals(item.Section, "Temporary Files", StringComparison.OrdinalIgnoreCase))
                     .Sum(item => item.SizeBytes),
-                BrowserCacheCount = entries.Count(item => string.Equals(item.Section, "Browser Cache", StringComparison.OrdinalIgnoreCase)),
+                BrowserCacheCount = entries.Count(item => IsBrowserDataSection(item.Section)),
                 BrowserCacheBytes = entries
-                    .Where(item => string.Equals(item.Section, "Browser Cache", StringComparison.OrdinalIgnoreCase))
+                    .Where(item => IsBrowserDataSection(item.Section))
                     .Sum(item => item.SizeBytes),
                 CleanableCount = entries.Count(item => item.IsCleanable),
                 CleanableBytes = entries.Where(item => item.IsCleanable).Sum(item => item.SizeBytes),
@@ -38,6 +38,12 @@ namespace SweepCoreApp
 
             PopulateDriveInfo(snapshot);
             return snapshot;
+        }
+
+        private static bool IsBrowserDataSection(string section)
+        {
+            return string.Equals(section, "Browser Cache", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(section, "Browser Data", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string ReadOperatingSystemLabel()

@@ -44,7 +44,6 @@ namespace SweepCoreApp
                 {
                     result.AttemptedProcessCount++;
                     bool closed = false;
-                    bool forced = false;
 
                     try
                     {
@@ -67,28 +66,17 @@ namespace SweepCoreApp
 
                                 try
                                 {
-                                    process.WaitForExit(3000);
+                                    process.WaitForExit(10000);
                                 }
                                 catch
                                 {
                                 }
                             }
 
-                            if (!process.HasExited)
-                            {
-                                process.Kill();
-                                process.WaitForExit(5000);
-                                forced = true;
-                            }
-
                             if (process.HasExited)
                             {
                                 result.ClosedProcessCount++;
                                 closed = true;
-                                if (forced)
-                                {
-                                    result.ForcedProcessCount++;
-                                }
                             }
                         }
                     }
@@ -138,7 +126,7 @@ namespace SweepCoreApp
             }
             else
             {
-                result.Summary = "Could not close: " + string.Join(", ", failedLabels);
+                result.Summary = "Could not close gracefully: " + string.Join(", ", failedLabels);
             }
 
             return result;
@@ -154,7 +142,9 @@ namespace SweepCoreApp
 
             foreach (var entry in entries)
             {
-                if (entry == null || !string.Equals(entry.Section, "Browser Cache", StringComparison.OrdinalIgnoreCase))
+                if (entry == null ||
+                    (!string.Equals(entry.Section, "Browser Cache", StringComparison.OrdinalIgnoreCase) &&
+                     !string.Equals(entry.Section, "Browser Data", StringComparison.OrdinalIgnoreCase)))
                 {
                     continue;
                 }

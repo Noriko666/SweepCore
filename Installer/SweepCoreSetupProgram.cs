@@ -11,11 +11,12 @@ namespace SweepCoreSetup
     internal static class SweepCoreSetupProgram
     {
         private const string AppName = "SweepCore";
-        private const string AppVersion = "1.0";
+        private const string AppVersion = "1.1";
         private const string Publisher = "SweepCore";
         private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\SweepCore";
         private const string AppResourceName = "SweepCore.Payload.SweepCore.exe";
         private const string LogoResourceName = "SweepCore.Payload.sweepcore-hero-logo.png";
+        private const string IconResourceName = "SweepCore.Payload.sweepcore.ico";
 
         private static readonly string InstallRoot = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -25,6 +26,7 @@ namespace SweepCoreSetup
         private static readonly string InstallExePath = Path.Combine(InstallRoot, "SweepCore.exe");
         private static readonly string AssetsDirectory = Path.Combine(InstallRoot, "Assets");
         private static readonly string InstalledLogoPath = Path.Combine(AssetsDirectory, "sweepcore-hero-logo.png");
+        private static readonly string InstalledIconPath = Path.Combine(AssetsDirectory, "sweepcore.ico");
         private static readonly string InstallerDirectory = Path.Combine(InstallRoot, "Installer");
         private static readonly string InstalledSetupPath = Path.Combine(InstallerDirectory, "SweepCoreSetup.exe");
         private static readonly string InstalledUninstallerPath = Path.Combine(InstallRoot, "Uninstall SweepCore.exe");
@@ -119,6 +121,7 @@ namespace SweepCoreSetup
 
             ExtractResourceToFile(AppResourceName, InstallExePath);
             ExtractResourceToFile(LogoResourceName, InstalledLogoPath);
+            ExtractResourceToFile(IconResourceName, InstalledIconPath);
             CopyCurrentSetupExecutable();
             CopyCurrentExecutableTo(InstalledUninstallerPath);
 

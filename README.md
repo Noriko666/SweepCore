@@ -1,8 +1,8 @@
-# SweepCore 1.0
+# SweepCore 1.1
 
 SweepCore is a Windows desktop utility for three common maintenance tasks:
 
-- cleaning temporary files and browser cache
+- cleaning temporary files and selected browser data
 - uninstalling installed applications
 - managing Windows startup entries
 
@@ -41,6 +41,8 @@ The installer places SweepCore in the local user profile, creates a desktop shor
 ### Clean up
 
 - guided scan -> select -> clean workflow
+- optional full temp cleanup mode for users who want a more aggressive cleanup
+- selectable browser data options for cache, cookies, and history
 - clear separation of cleanup targets
 - file preview for the current selection
 - explicit selection before cleanup starts
@@ -64,16 +66,15 @@ The installer places SweepCore in the local user profile, creates a desktop shor
 
 SweepCore currently scans supported locations such as:
 
-- user temp files
-- Windows temp files
+- user temp files older than one week by default, or all matching temp files when full temp cleanup is enabled
+- Windows temp files older than one week by default, or all matching temp files when full temp cleanup is enabled
 - crash dump files
 - Windows Error Reporting files
-- browser cache data for Chrome
-- browser cache data for Edge
-- browser cache data for Brave
-- browser cache data for Firefox
+- browser cache data for Chrome, Edge, Brave, and Firefox
+- browser cookies for Chrome, Edge, Brave, and Firefox
+- browser history for Chrome, Edge, and Brave
 
-Browser cleanup is intentionally limited to cache-related locations. Passwords, saved addresses, autofill data, and profile databases are excluded.
+Cookies are optional and include an explicit logout warning. Passwords, saved addresses, autofill data, bookmarks, personal files, and unrelated profile databases are excluded. Firefox history is not removed because Firefox stores browsing history together with bookmarks.
 
 ## Safety Approach
 
